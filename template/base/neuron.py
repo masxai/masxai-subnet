@@ -28,6 +28,9 @@ from template.utils.misc import ttl_get_block
 from template import __spec_version__ as spec_version
 from template.mock import MockSubtensor, MockMetagraph
 
+# bittensor >=10 relocated the mock wallet out of the top-level `bt` namespace.
+from bittensor_wallet.mock import get_mock_wallet
+
 
 class BaseNeuron(ABC):
     """
@@ -50,9 +53,9 @@ class BaseNeuron(ABC):
     def config(cls):
         return config(cls)
 
-    subtensor: "bt.subtensor"
-    wallet: "bt.wallet"
-    metagraph: "bt.metagraph"
+    subtensor: "bt.Subtensor"
+    wallet: "bt.Wallet"
+    metagraph: "bt.Metagraph"
     spec_version: int = spec_version
 
     @property
@@ -80,7 +83,7 @@ class BaseNeuron(ABC):
 
         # The wallet holds the cryptographic key pairs for the miner.
         if self.config.mock:
-            self.wallet = bt.MockWallet(config=self.config)
+            self.wallet = get_mock_wallet()
             self.subtensor = MockSubtensor(
                 self.config.netuid, wallet=self.wallet
             )
@@ -88,8 +91,8 @@ class BaseNeuron(ABC):
                 self.config.netuid, subtensor=self.subtensor
             )
         else:
-            self.wallet = bt.wallet(config=self.config)
-            self.subtensor = bt.subtensor(config=self.config)
+            self.wallet = bt.Wallet(config=self.config)
+            self.subtensor = bt.Subtensor(config=self.config)
             self.metagraph = self.subtensor.metagraph(self.config.netuid)
 
         bt.logging.info(f"Wallet: {self.wallet}")

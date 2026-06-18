@@ -1,213 +1,135 @@
-<div align="center">
+# MASXAI Subnet — v1 (Lightweight)
 
-# **Bittensor Subnet Template** <!-- omit in toc -->
-[![Discord Chat](https://img.shields.io/discord/308323056592486420.svg)](https://discord.gg/bittensor)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
+A minimal, runnable Bittensor forecasting subnet for **testnet netuid 501**.
 
----
+v1 forecasts **short-horizon TAO price direction** ("will TAO be higher in 60
+minutes?") so the reward loop closes within the hour — no LLM, no human resolver,
+no database. The full MASXAI geopolitical engine plugs in later as a second
+forecast category (see `CLAUDE.md` → roadmap).
 
-## The Incentivized Internet <!-- omit in toc -->
+## Why price-direction for v1?
 
-[Discord](https://discord.gg/bittensor) • [Network](https://taostats.io/) • [Research](https://bittensor.com/whitepaper)
-</div>
+A forecasting subnet's reward signal must arrive fast enough to validate the
+mechanics on testnet. Geopolitical forecasts resolve in weeks; you can't debug a
+loop that pays out in 14 days. TAO price direction resolves in 60 minutes against
+a free oracle, so every hour you see real Brier scores, EMA updates, and weight
+changes. Prove the mechanics here, then swap in harder forecast categories.
 
----
-- [Quickstarter template](#quickstarter-template)
-- [Introduction](#introduction)
-  - [Example](#example)
-- [Installation](#installation)
-  - [Before you proceed](#before-you-proceed)
-  - [Install](#install)
-- [Writing your own incentive mechanism](#writing-your-own-incentive-mechanism)
-- [Writing your own subnet API](#writing-your-own-subnet-api)
-- [Subnet Links](#subnet-links)
-- [License](#license)
-
----
-## Quickstarter template
-
-This template contains all the required installation instructions, scripts, and files and functions for:
-- Building Bittensor subnets.
-- Creating custom incentive mechanisms and running these mechanisms on the subnets. 
-
-In order to simplify the building of subnets, this template abstracts away the complexity of the underlying blockchain and other boilerplate code. While the default behavior of the template is sufficient for a simple subnet, you should customize the template in order to meet your specific requirements.
----
-
-## Introduction
-
-**IMPORTANT**: If you are new to Bittensor subnets, read this section before proceeding to [Installation](#installation) section. 
-
-The Bittensor blockchain hosts multiple self-contained incentive mechanisms called **subnets**. Subnets are playing fields in which:
-- Subnet miners who produce value, and
-- Subnet validators who produce consensus
-
-determine together the proper distribution of TAO for the purpose of incentivizing the creation of value, i.e., generating digital commodities, such as intelligence or data. 
-
-Each subnet consists of:
-- Subnet miners and subnet validators.
-- A protocol using which the subnet miners and subnet validators interact with one another. This protocol is part of the incentive mechanism.
-- The Bittensor API using which the subnet miners and subnet validators interact with Bittensor's onchain consensus engine [Yuma Consensus](https://bittensor.com/documentation/validating/yuma-consensus). The Yuma Consensus is designed to drive these actors: subnet validators and subnet miners, into agreement on who is creating value and what that value is worth. 
-
-This starter template is split into three primary files. To write your own incentive mechanism, you should edit these files. These files are:
-1. `template/protocol.py`: Contains the definition of the protocol used by subnet miners and subnet validators.
-2. `neurons/miner.py`: Script that defines the subnet miner's behavior, i.e., how the subnet miner responds to requests from subnet validators.
-3. `neurons/validator.py`: This script defines the subnet validator's behavior, i.e., how the subnet validator requests information from the subnet miners and determines the scores.
-
-### Example
-
-The Bittensor Subnet 1 for Text Prompting is built using this template. See [prompting](https://github.com/macrocosm-os/prompting) for how to configure the files and how to add monitoring and telemetry and support multiple miner types. Also see this Subnet 1 in action on [Taostats](https://taostats.io/subnets/netuid-1/) explorer.
-
----
-
-## Installation
-
-### Before you proceed
-Before you proceed with the installation of the subnet, note the following: 
-
-- Use these instructions to run your subnet locally for your development and testing, or on Bittensor testnet or on Bittensor mainnet. 
-- **IMPORTANT**: We **strongly recommend** that you first run your subnet locally and complete your development and testing before running the subnet on Bittensor testnet. Furthermore, make sure that you next run your subnet on Bittensor testnet before running it on the Bittensor mainnet.
-- You can run your subnet either as a subnet owner, or as a subnet validator or as a subnet miner. 
-- **IMPORTANT:** Make sure you are aware of the minimum compute requirements for your subnet. See the [Minimum compute YAML configuration](./min_compute.yml).
-- Note that installation instructions differ based on your situation: For example, installing for local development and testing will require a few additional steps compared to installing for testnet. Similarly, installation instructions differ for a subnet owner vs a validator or a miner. 
-
-### Install
-
-- **Running locally**: Follow the step-by-step instructions described in this section: [Running Subnet Locally](./docs/running_on_staging.md).
-- **Running on Bittensor testnet**: Follow the step-by-step instructions described in this section: [Running on the Test Network](./docs/running_on_testnet.md).
-- **Running on Bittensor mainnet**: Follow the step-by-step instructions described in this section: [Running on the Main Network](./docs/running_on_mainnet.md).
-
----
-
-## Writing your own incentive mechanism
-
-As described in [Quickstarter template](#quickstarter-template) section above, when you are ready to write your own incentive mechanism, update this template repository by editing the following files. The code in these files contains detailed documentation on how to update the template. Read the documentation in each of the files to understand how to update the template. There are multiple **TODO**s in each of the files identifying sections you should update. These files are:
-- `template/protocol.py`: Contains the definition of the wire-protocol used by miners and validators.
-- `neurons/miner.py`: Script that defines the miner's behavior, i.e., how the miner responds to requests from validators.
-- `neurons/validator.py`: This script defines the validator's behavior, i.e., how the validator requests information from the miners and determines the scores.
-- `template/forward.py`: Contains the definition of the validator's forward pass.
-- `template/reward.py`: Contains the definition of how validators reward miner responses.
-
-In addition to the above files, you should also update the following files:
-- `README.md`: This file contains the documentation for your project. Update this file to reflect your project's documentation.
-- `CONTRIBUTING.md`: This file contains the instructions for contributing to your project. Update this file to reflect your project's contribution guidelines.
-- `template/__init__.py`: This file contains the version of your project.
-- `setup.py`: This file contains the metadata about your project. Update this file to reflect your project's metadata.
-- `docs/`: This directory contains the documentation for your project. Update this directory to reflect your project's documentation.
-
-__Note__
-The `template` directory should also be renamed to your project name.
----
-
-# Writing your own subnet API
-To leverage the abstract `SubnetsAPI` in Bittensor, you can implement a standardized interface. This interface is used to interact with the Bittensor network and can be used by a client to interact with the subnet through its exposed axons.
-
-What does Bittensor communication entail? Typically two processes, (1) preparing data for transit (creating and filling `synapse`s) and (2), processing the responses received from the `axon`(s).
-
-This protocol uses a handler registry system to associate bespoke interfaces for subnets by implementing two simple abstract functions:
-- `prepare_synapse`
-- `process_responses`
-
-These can be implemented as extensions of the generic `SubnetsAPI` interface.  E.g.:
-
-
-This is abstract, generic, and takes(`*args`, `**kwargs`) for flexibility. See the extremely simple base class:
-```python
-class SubnetsAPI(ABC):
-    def __init__(self, wallet: "bt.wallet"):
-        self.wallet = wallet
-        self.dendrite = bt.dendrite(wallet=wallet)
-
-    async def __call__(self, *args, **kwargs):
-        return await self.query_api(*args, **kwargs)
-
-    @abstractmethod
-    def prepare_synapse(self, *args, **kwargs) -> Any:
-        """
-        Prepare the synapse-specific payload.
-        """
-        ...
-
-    @abstractmethod
-    def process_responses(self, responses: List[Union["bt.Synapse", Any]]) -> Any:
-        """
-        Process the responses from the network.
-        """
-        ...
+## Architecture
 
 ```
-
-
-Here is a toy example:
-
-```python
-from bittensor.subnets import SubnetsAPI
-from MySubnet import MySynapse
-
-class MySynapseAPI(SubnetsAPI):
-    def __init__(self, wallet: "bt.wallet"):
-        super().__init__(wallet)
-        self.netuid = 99
-
-    def prepare_synapse(self, prompt: str) -> MySynapse:
-        # Do any preparatory work to fill the synapse
-        data = do_prompt_injection(prompt)
-
-        # Fill the synapse for transit
-        synapse = StoreUser(
-            messages=[data],
-        )
-        # Send it along
-        return synapse
-
-    def process_responses(self, responses: List[Union["bt.Synapse", Any]]) -> str:
-        # Look through the responses for information required by your application
-        for response in responses:
-            if response.dendrite.status_code != 200:
-                continue
-            # potentially apply post processing
-            result_data = postprocess_data_from_response(response)
-        # return data to the client
-        return result_data
+validator                              miner
+   │  issue: snapshot price, query ───────►  predict P(price higher)
+   │  store in PENDING queue          ◄───────  return probability
+   │
+   │  (60 min later)
+   │  resolve: fetch new price, score with Brier
+   │  EMA into per-miner score
+   │  set weights on chain
 ```
 
-You can use a subnet API to the registry by doing the following:
-1. Download and install the specific repo you want
-1. Import the appropriate API handler from bespoke subnets
-1. Make the query given the subnet specific API
+The **deferred-resolution queue** in `neurons/validator.py` is the core idea:
+forecasts are issued one epoch and scored a later epoch when the horizon passes.
 
+## Files
 
+| File | Role |
+|------|------|
+| `masxai/protocol.py` | `ForecastSynapse` wire protocol |
+| `masxai/constants.py` | All v1 constants (netuid 501, 60-min horizon, etc.) |
+| `masxai/oracle.py` | Free CoinGecko price feed + outcome resolution (soft-fail) |
+| `masxai/scoring.py` | Brier score → reward → EMA |
+| `neurons/miner.py` | Zero-dependency baseline miner |
+| `neurons/validator.py` | Validator with deferred-resolution queue |
+| `tests/test_scoring.py` | Verify scoring math before testnet |
 
-# Subnet Links
-In order to see real-world examples of subnets in-action, see the `subnet_links.py` document or access them from inside the `template` package by:
-```python
-import template
-template.SUBNET_LINKS
-[{'name': 'sn0', 'url': ''},
- {'name': 'sn1', 'url': 'https://github.com/opentensor/prompting/'},
- {'name': 'sn2', 'url': 'https://github.com/bittranslateio/bittranslate/'},
- {'name': 'sn3', 'url': 'https://github.com/gitphantomman/scraping_subnet/'},
- {'name': 'sn4', 'url': 'https://github.com/manifold-inc/targon/'},
-...
-]
+## Setup
+
+This repo is meant to be a **fork of `opentensor/bittensor-subnet-template`** so
+that `template.base.miner` / `template.base.validator` are importable. Copy the
+`masxai/` package and `neurons/` files into your fork.
+
+```bash
+git clone https://github.com/opentensor/bittensor-subnet-template.git masxai-subnet
+cd masxai-subnet
+# drop in the masxai/ package and neurons/miner.py, neurons/validator.py
+pip install -e .
+pip install -r requirements.txt
 ```
 
-## License
-This repository is licensed under the MIT License.
-```text
-# The MIT License (MIT)
-# Copyright © 2024 Opentensor Foundation
+## Test first
 
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-# the Software.
-
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+```bash
+pytest tests/test_scoring.py -v
 ```
+
+Expected: coin-flip reward = 0.75, confident-correct ≈ 1.0, confident-wrong ≈ 0.02.
+
+## Watch the loop locally (no testnet)
+
+Before registering on chain, you can watch the whole issue → resolve → weight
+loop close in ~30 seconds against a simulated price feed and mock miners:
+
+```bash
+python scripts/mock_run.py
+# options: --miners 12 --steps 18 --tick 1.5 --horizon 3 --drift 0.8
+```
+
+This runs the **real** validator logic (`resolve_due`, `issue_round`, Brier
+scoring, EMA, state persistence) and only stubs the network primitives
+(metagraph/wallet/dendrite) and the oracle (a random walk with upward drift, so
+the 60-min horizon is compressed to seconds). Mock miners run distinct
+strategies (bullish / bearish / baseline / flaky); you should see bullish miners
+climb the EMA leaderboard and earn the most weight, bearish miners earn the
+least — confirming the scoring rule rewards calibration.
+
+## Register on testnet 501
+
+```bash
+btcli subnet register --netuid 501 --subtensor.network test \
+  --wallet.name masxai-miner --wallet.hotkey default
+btcli subnet register --netuid 501 --subtensor.network test \
+  --wallet.name masxai-validator --wallet.hotkey default
+
+# stake to the validator so it earns a permit to set weights
+btcli stake add --netuid 501 --subtensor.network test \
+  --wallet.name masxai-validator --wallet.hotkey default
+```
+
+## Run
+
+```bash
+# miner (axon on :8901)
+python neurons/miner.py --netuid 501 --subtensor.network test \
+  --wallet.name masxai-miner --wallet.hotkey default \
+  --axon.port 8901 --logging.debug
+
+# validator
+python neurons/validator.py --netuid 501 --subtensor.network test \
+  --wallet.name masxai-validator --wallet.hotkey default --logging.debug
+```
+
+## Verify it's working
+
+```bash
+btcli wallet overview --netuid 501 --subtensor.network test \
+  --wallet.name masxai-validator
+```
+
+Within ~1–2 hours you should see the validator log resolved forecasts, scores
+updating, and EMISSION/INCENTIVE columns becoming non-zero for the miner.
+
+## Known v1 limitations (intentional)
+
+- **Copy-trading is possible** — price-direction answers are trivially copyable.
+  Run only operator-controlled miners in v1. **Add commit-reveal (v1.1) before
+  opening registration to the public.**
+- No reputation, no specialization, single validator, no Brier decomposition.
+  All deferred — see roadmap in `CLAUDE.md`.
+
+## Building a real miner
+
+Replace `predict()` in `neurons/miner.py`. The contract: given the synapse,
+return `P(price_at_resolve > reference_price)` in `[0.01, 0.99]`. A momentum
+signal, an order-book model, an LLM, or the full MASXAI engine all slot in here
+without touching the validator or protocol.

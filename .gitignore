@@ -163,3 +163,7 @@ testing/
 
 # Editors
 .vscode/settings.json
+
+# MASXAI validator state (runtime artifact, do not commit)
+validator_state.json
+scripts/mock_validator_state.json
