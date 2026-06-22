@@ -1,61 +1,90 @@
 """
-neurons/miner.py — MASXAI v1 baseline miner.
+neurons/miner.py - MASXAI MVP miner.
 
-Runs with ZERO API keys. Anyone can launch it. It answers price-direction
-forecasting questions with a calibrated baseline probability.
-
-The baseline strategy: short-horizon price direction is close to a coin flip,
-so an honest miner returns ~0.5 with a tiny momentum nudge. This is deliberately
-weak — it exists so the loop runs and so real miners have something to beat.
-
-To build a SERIOUS miner, replace `predict()` with your own model (momentum,
-order-book signals, an LLM, or the full MASXAI engine). The contract is simple:
-given the synapse, return a probability in [0.01, 0.99] that the price will be
-HIGHER at resolve_at than the reference_price.
-
-Built on the opentensor/bittensor-subnet-template BaseMinerNeuron (SDK v10).
-Place this repo as a fork of that template so `template.base.miner` is importable.
+Miners use Gemini as the forecasting engine when GEMINI_API_KEY or GOOGLE_API_KEY
+is configured. Without a key, the miner still serves a neutral baseline forecast
+so local runs and testnet smoke tests do not require secrets.
 """
 
+import os
+import sys
+import asyncio
 import time
 import typing
 
-import bittensor as bt
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from masxai.protocol import ForecastSynapse
 from masxai import constants as C
-from masxai.scoring import clamp_prob
+from masxai.bt_compat import bt
+from masxai.discord import publish_forecast
+from masxai.env import load_env
+from masxai.gemini import baseline_forecast, generate_forecast
 
 # Provided by the bittensor-subnet-template fork:
-from template.base.miner import BaseMinerNeuron
+try:
+    from template.base.miner import BaseMinerNeuron
+except Exception:
+    class BaseMinerNeuron:  # type: ignore[no-redef]
+        def __init__(self, *_, **__):
+            raise RuntimeError("BaseMinerNeuron requires a working bittensor install")
 
 
-def predict(synapse: ForecastSynapse) -> float:
+def predict(synapse: ForecastSynapse) -> dict:
     """
-    Baseline prediction. Returns P(price higher at resolve time).
-
-    v1 baseline = neutral 0.5. Honest, calibrated, and easy to beat — exactly
-    what a reference miner should be. Override this with a real model.
+    Baseline structured forecast. Kept as a simple override point for custom
+    miners and for the local mock runner.
     """
-    return C.NEUTRAL_PROB
+    return baseline_forecast(synapse)
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
 class Miner(BaseMinerNeuron):
     def __init__(self, config=None):
+        load_env()
         super().__init__(config=config)
+        gemini_key_set = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+        bt.logging.info(
+            "Gemini config | "
+            f"enabled={_env_flag('GEMINI_ENABLED', True)} "
+            f"key_set={gemini_key_set} "
+            f"model={os.getenv('GEMINI_MODEL', C.GEMINI_MODEL)} "
+            f"timeout={os.getenv('GEMINI_TIMEOUT', C.GEMINI_TIMEOUT)}"
+        )
         bt.logging.info("MASXAI v1 baseline miner initialized.")
 
     async def forward(self, synapse: ForecastSynapse) -> ForecastSynapse:
-        """Answer a forecasting question with a probability."""
+        """Answer a forecasting question with a structured Gemini forecast."""
         try:
-            p = clamp_prob(predict(synapse))
+            forecast = await generate_forecast(synapse)
         except Exception as e:  # noqa: BLE001 — never let forward crash
             bt.logging.warning(f"miner predict failed, returning neutral: {e}")
-            p = C.NEUTRAL_PROB
+            forecast = predict(synapse)
 
-        synapse.probability = p
+        synapse.forecast_id = str(forecast.get("forecast_id") or synapse.forecast_id)
+        synapse.prediction = forecast.get("prediction")
+        synapse.confidence = forecast.get("confidence")
+        synapse.reasoning = str(forecast.get("reasoning") or "")
+        synapse.timestamp = str(forecast.get("timestamp") or "")
+        synapse.model = str(forecast.get("model") or C.GEMINI_MODEL)
+
+        if synapse.prediction is not None and synapse.confidence is not None:
+            synapse.probability = (
+                float(synapse.confidence)
+                if synapse.prediction
+                else 1.0 - float(synapse.confidence)
+            )
+
+        asyncio.create_task(publish_forecast(forecast))
         bt.logging.debug(
-            f"answered: cat={synapse.category} ref={synapse.reference_price} -> p={p:.3f}"
+            f"answered: event={synapse.event_type} prediction={synapse.prediction} "
+            f"confidence={synapse.confidence}"
         )
         return synapse
 

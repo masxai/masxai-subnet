@@ -1,89 +1,147 @@
-# MASXAI Subnet — v1 (Lightweight)
+# MasXAI Subnet MVP
 
-A minimal, runnable Bittensor forecasting subnet for **testnet netuid 501**.
+MasXAI is a Bittensor forecasting subnet for Bittensor ecosystem events. Miners
+run Gemini-backed forecasting agents, validators resolve objective ground truth,
+score forecasts, and set miner weights from forecast quality.
 
-v1 forecasts **short-horizon TAO price direction** ("will TAO be higher in 60
-minutes?") so the reward loop closes within the hour — no LLM, no human resolver,
-no database. The full MASXAI geopolitical engine plugs in later as a second
-forecast category (see `CLAUDE.md` → roadmap).
+The current implementation keeps the proven deferred-resolution loop from the
+lightweight v1 code, then adds the MVP forecast schema, Gemini miner path, and
+Discord publishing.
 
-## Why price-direction for v1?
+## MVP Forecasts
 
-A forecasting subnet's reward signal must arrive fast enough to validate the
-mechanics on testnet. Geopolitical forecasts resolve in weeks; you can't debug a
-loop that pays out in 14 days. TAO price direction resolves in 60 minutes against
-a free oracle, so every hour you see real Brier scores, EMA updates, and weight
-changes. Prove the mechanics here, then swap in harder forecast categories.
+Supported event taxonomy:
 
-## Architecture
+- `tao_price_movement`
+- `subnet_token_price`
+- `new_subnet_registration`
+- `governance_outcome`
+- `ecosystem_growth_metric`
+- `significant_bittensor_event`
 
+The validator only issues event types listed in `masxai/constants.py` as
+`ENABLED_EVENT_TYPES`. By default this is `tao_price_movement`, because it has
+automatic objective resolution through the price oracle. Add more event types to
+that list only after adding an objective resolver in `masxai/oracle.py`.
+
+## Forecast Schema
+
+Miner responses follow the MVP schema:
+
+```json
+{
+  "forecast_id": "uuid",
+  "event_type": "tao_price_movement",
+  "prediction": true,
+  "confidence": 0.92,
+  "forecast_window": "1h",
+  "reasoning": "network activity and price momentum remain positive",
+  "timestamp": "ISO8601"
+}
 ```
-validator                              miner
-   │  issue: snapshot price, query ───────►  predict P(price higher)
-   │  store in PENDING queue          ◄───────  return probability
-   │
-   │  (60 min later)
-   │  resolve: fetch new price, score with Brier
-   │  EMA into per-miner score
-   │  set weights on chain
+
+## Miner Workflow
+
+1. Receive a validator forecasting task.
+2. Build a Gemini prompt from the task and validator-supplied context.
+3. Generate a structured forecast.
+4. Return the forecast to the validator.
+5. Publish a summary to Discord when `DISCORD_WEBHOOK_URL` is configured.
+
+Gemini configuration lives in a local `.env` file:
+
+```bash
+cp .env.example .env
 ```
 
-The **deferred-resolution queue** in `neurons/validator.py` is the core idea:
-forecasts are issued one epoch and scored a later epoch when the horizon passes.
+Then edit `.env`:
 
-## Files
+```env
+GEMINI_API_KEY=your-gemini-key
+GEMINI_ENABLED=true
+GEMINI_MODEL=gemini-2.5-pro
+GEMINI_TIMEOUT=8
+DISCORD_WEBHOOK_URL=your-discord-webhook
+MASXAI_FALLBACK_TAO_PRICE_USD=
+MASXAI_FORECAST_INTERVAL_SECONDS=300
+```
 
-| File | Role |
-|------|------|
-| `masxai/protocol.py` | `ForecastSynapse` wire protocol |
-| `masxai/constants.py` | All v1 constants (netuid 501, 60-min horizon, etc.) |
-| `masxai/oracle.py` | Free CoinGecko price feed + outcome resolution (soft-fail) |
-| `masxai/scoring.py` | Brier score → reward → EMA |
-| `neurons/miner.py` | Zero-dependency baseline miner |
-| `neurons/validator.py` | Validator with deferred-resolution queue |
-| `tests/test_scoring.py` | Verify scoring math before testnet |
+`.env` is ignored by git. The miner loads it automatically.
+
+`MASXAI_FALLBACK_TAO_PRICE_USD` is optional. Leave it empty for objective
+oracle-based scoring. For testnet/dev only, set it to a TAO/USD value if your
+machine cannot reach CoinGecko, Binance, or Kraken and the validator logs
+`oracle unavailable; skipping issue this epoch`.
+
+`MASXAI_FORECAST_INTERVAL_SECONDS` controls how often the validator asks miners
+for a new forecast. `300` means one forecast round every 5 minutes.
+
+Without a Gemini key, the miner returns a neutral baseline forecast so local
+testing still works.
+
+If the miner logs `ConnectTimeout` for Gemini, the server cannot reach
+`generativelanguage.googleapis.com` quickly enough. You can raise
+`GEMINI_TIMEOUT` up to about `15`, or set `GEMINI_ENABLED=false` to run explicit
+baseline mode until outbound connectivity is fixed.
+
+## Validator Workflow
+
+1. Snapshot objective reference data.
+2. Query miner axons with a `ForecastSynapse`.
+3. Store miner forecasts in the pending queue.
+4. Wait for `resolve_at`.
+5. Fetch actual outcome from the oracle.
+6. Score each forecast.
+7. EMA the score into `self.scores` so the template weight machinery can submit
+   weights on chain.
+
+Pending forecasts and scores are persisted to `validator_state.json`.
+
+## Scoring
+
+Structured forecasts use the MVP weighted score:
+
+```text
+Final Score =
+50% Accuracy +
+20% Confidence Calibration +
+20% Historical Consistency +
+10% Timeliness
+```
+
+Legacy Brier helpers remain in `masxai/scoring.py` for probability-only tests and
+older local mocks.
 
 ## Setup
 
-This repo is meant to be a **fork of `opentensor/bittensor-subnet-template`** so
-that `template.base.miner` / `template.base.validator` are importable. Copy the
-`masxai/` package and `neurons/` files into your fork.
-
 ```bash
-git clone https://github.com/opentensor/bittensor-subnet-template.git masxai-subnet
-cd masxai-subnet
-# drop in the masxai/ package and neurons/miner.py, neurons/validator.py
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 pip install -r requirements.txt
+python scripts/patch_btcli_compat.py
+cp .env.example .env
 ```
 
-## Test first
+Run `python scripts/patch_btcli_compat.py` again after installing or upgrading
+`bittensor-cli`. It only patches the CLI package in the active environment and
+does not change MASXAI subnet core code. It fixes two known testnet CLI issues:
+missing `Swap.AlphaSqrtPrice` in `wallet overview`, and negative transaction era
+during `subnet register`.
+
+Run tests:
 
 ```bash
-pytest tests/test_scoring.py -v
+python -m pytest tests/test_scoring.py -v
 ```
 
-Expected: coin-flip reward = 0.75, confident-correct ≈ 1.0, confident-wrong ≈ 0.02.
-
-## Watch the loop locally (no testnet)
-
-Before registering on chain, you can watch the whole issue → resolve → weight
-loop close in ~30 seconds against a simulated price feed and mock miners:
+Run the local loop without chain access:
 
 ```bash
 python scripts/mock_run.py
-# options: --miners 12 --steps 18 --tick 1.5 --horizon 3 --drift 0.8
 ```
 
-This runs the **real** validator logic (`resolve_due`, `issue_round`, Brier
-scoring, EMA, state persistence) and only stubs the network primitives
-(metagraph/wallet/dendrite) and the oracle (a random walk with upward drift, so
-the 60-min horizon is compressed to seconds). Mock miners run distinct
-strategies (bullish / bearish / baseline / flaky); you should see bullish miners
-climb the EMA leaderboard and earn the most weight, bearish miners earn the
-least — confirming the scoring rule rewards calibration.
-
-## Register on testnet 501
+## Testnet 501
 
 ```bash
 btcli subnet register --netuid 501 --subtensor.network test \
@@ -91,45 +149,20 @@ btcli subnet register --netuid 501 --subtensor.network test \
 btcli subnet register --netuid 501 --subtensor.network test \
   --wallet.name masxai-validator --wallet.hotkey default
 
-# stake to the validator so it earns a permit to set weights
 btcli stake add --netuid 501 --subtensor.network test \
   --wallet.name masxai-validator --wallet.hotkey default
-```
 
-## Run
-
-```bash
-# miner (axon on :8901)
 python neurons/miner.py --netuid 501 --subtensor.network test \
   --wallet.name masxai-miner --wallet.hotkey default \
   --axon.port 8901 --logging.debug
 
-# validator
 python neurons/validator.py --netuid 501 --subtensor.network test \
   --wallet.name masxai-validator --wallet.hotkey default --logging.debug
 ```
 
-## Verify it's working
+## MVP Economics
 
-```bash
-btcli wallet overview --netuid 501 --subtensor.network test \
-  --wallet.name masxai-validator
-```
-
-Within ~1–2 hours you should see the validator log resolved forecasts, scores
-updating, and EMISSION/INCENTIVE columns becoming non-zero for the miner.
-
-## Known v1 limitations (intentional)
-
-- **Copy-trading is possible** — price-direction answers are trivially copyable.
-  Run only operator-controlled miners in v1. **Add commit-reveal (v1.1) before
-  opening registration to the public.**
-- No reputation, no specialization, single validator, no Brier decomposition.
-  All deferred — see roadmap in `CLAUDE.md`.
-
-## Building a real miner
-
-Replace `predict()` in `neurons/miner.py`. The contract: given the synapse,
-return `P(price_at_resolve > reference_price)` in `[0.01, 0.99]`. A momentum
-signal, an order-book model, an LLM, or the full MASXAI engine all slot in here
-without touching the validator or protocol.
+The product target is to burn 95% of miner emissions and distribute 5% according
+to validator weights. This repo currently computes and submits weights; emission
+burn mechanics must be enforced in subnet economics/runtime configuration, not
+inside miner forecast code.

@@ -1,4 +1,5 @@
 starlette>=0.30.0
+bittensor>=9
 pydantic>=2
 rich>=13
 pytest>=8
@@ -8,3 +9,4 @@ setuptools>=68
 
 # MASXAI v1 — free price oracle (CoinGecko) for deferred resolution
 httpx>=0.27.0
+python-dotenv>=1.0.0

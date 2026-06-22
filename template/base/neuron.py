@@ -63,8 +63,8 @@ class BaseNeuron(ABC):
         return ttl_get_block(self)
 
     def __init__(self, config=None):
-        base_config = copy.deepcopy(config or BaseNeuron.config())
-        self.config = self.config()
+        base_config = copy.deepcopy(config or self.__class__.config())
+        self.config = self.__class__.config()
         self.config.merge(base_config)
         self.check_config(self.config)
 
