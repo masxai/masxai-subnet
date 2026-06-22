@@ -82,6 +82,7 @@ the scoring tests plus the mock loop.
 
 ```bash
 source .venv/bin/activate
+python scripts/patch_btcli_compat.py
 python -m pytest tests/test_scoring.py -v
 python scripts/mock_run.py
 ```

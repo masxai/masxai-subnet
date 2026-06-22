@@ -119,8 +119,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 pip install -r requirements.txt
+python scripts/patch_btcli_compat.py
 cp .env.example .env
 ```
+
+Run `python scripts/patch_btcli_compat.py` again after installing or upgrading
+`bittensor-cli`. It only patches the CLI package in the active environment and
+does not change MASXAI subnet core code. It fixes two known testnet CLI issues:
+missing `Swap.AlphaSqrtPrice` in `wallet overview`, and negative transaction era
+during `subnet register`.
 
 Run tests:
 
