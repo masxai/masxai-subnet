@@ -71,16 +71,17 @@ class MockPriceFeed:
 # 2. Miner strategies. Each mock uid runs a fixed strategy so the leaderboard   #
 #    spreads out. The baseline group uses the REAL neurons/miner.predict().     #
 # --------------------------------------------------------------------------- #
-def strategy_for(uid: int, synapse: ForecastSynapse, rng: random.Random) -> Optional[float]:
+def strategy_for(uid: int, synapse: ForecastSynapse, rng: random.Random):
     bucket = uid % 4
     if bucket == 1:
-        return 0.72                       # bullish — bets price goes up
+        return True, 0.72                 # bullish: bets price goes up
     if bucket == 2:
-        return 0.28                       # bearish — bets price goes down
+        return False, 0.72                # bearish: bets price goes down
     if bucket == 3:
-        return baseline_predict(synapse)  # real baseline miner (neutral 0.5)
-    # bucket == 0: flaky miner — answers ~60% of the time, else no answer (None)
-    return 0.65 if rng.random() < 0.6 else None
+        forecast = baseline_predict(synapse)
+        return forecast["prediction"], forecast["confidence"]
+    # bucket == 0: flaky miner answers ~60% of the time, else no answer.
+    return (True, 0.65) if rng.random() < 0.6 else (None, None)
 
 
 def strategy_label(uid: int) -> str:
@@ -108,7 +109,14 @@ class MockForecastDendrite:
         for axon in axons:
             uid = self.metagraph.hotkeys.index(axon.hotkey)
             resp = synapse.model_copy(deep=True)
-            resp.probability = strategy_for(uid, resp, self._rng)
+            prediction, confidence = strategy_for(uid, resp, self._rng)
+            resp.prediction = prediction
+            resp.confidence = confidence
+            resp.reasoning = f"mock {strategy_label(uid)} forecast"
+            resp.timestamp = "2026-01-01T00:00:00+00:00"
+            resp.model = "mock"
+            if prediction is not None and confidence is not None:
+                resp.probability = confidence if prediction else 1.0 - confidence
             responses.append(resp)
         await asyncio.sleep(0)            # behave like async I/O
         return responses
@@ -154,6 +162,7 @@ def build_validator(n_miners: int):
     v.scores = np.zeros(len(hotkeys), dtype=np.float32)
     v.pending = {}
     v.resolved_count = 0
+    v.last_issue_at = 0.0
     v.dendrite = MockForecastDendrite(v.metagraph)
     v.load_masxai_state()                 # real persistence load (no-op on clean start)
     return v
@@ -181,6 +190,7 @@ def print_leaderboard(validator, title: str):
 # --------------------------------------------------------------------------- #
 async def run(args):
     # patch the slow/real-world bits before constructing the validator
+    os.environ["MASXAI_FORECAST_INTERVAL_SECONDS"] = "0"
     feed = MockPriceFeed(drift=args.drift)
     oracle.fetch_price = feed.fetch_price            # validator calls oracle.fetch_price(...)
     C.FORECAST_HORIZON_SECONDS = args.horizon        # compress 3600s -> a few seconds

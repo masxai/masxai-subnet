@@ -8,9 +8,12 @@ import math
 from masxai import constants as C
 from masxai.scoring import (
     clamp_prob,
+    clamp_confidence,
     brier_score,
+    calibration_score,
     reward_from_brier,
     score_response,
+    score_structured_forecast,
     ema_update,
 )
 from masxai.oracle import resolve_outcome
@@ -20,6 +23,8 @@ def test_clamp_bounds():
     assert clamp_prob(0.0) == C.PROB_CLAMP_LO
     assert clamp_prob(1.0) == C.PROB_CLAMP_HI
     assert clamp_prob(0.5) == 0.5
+    assert clamp_confidence(-1.0) == 0.0
+    assert clamp_confidence(2.0) == 1.0
 
 
 def test_brier_confident_correct_is_low():
@@ -56,6 +61,30 @@ def test_ema_moves_toward_reward():
     for _ in range(50):
         s = ema_update(s, 1.0)
     assert s > 0.9  # converges upward toward sustained reward
+
+
+def test_structured_score_matches_mvp_weights():
+    reward = score_structured_forecast(
+        prediction=True,
+        confidence=0.9,
+        outcome=True,
+        previous_score=0.5,
+        submitted_at=10.0,
+        issued_at=0.0,
+        resolve_at=100.0,
+    )
+    expected = (
+        C.ACCURACY_WEIGHT * 1.0
+        + C.CALIBRATION_WEIGHT * 0.9
+        + C.CONSISTENCY_WEIGHT * 0.5
+        + C.TIMELINESS_WEIGHT * 0.9
+    )
+    assert math.isclose(reward, expected, abs_tol=1e-9)
+
+
+def test_calibration_penalizes_confident_wrong():
+    assert math.isclose(calibration_score(True, 0.9, True), 0.9, abs_tol=1e-9)
+    assert math.isclose(calibration_score(True, 0.9, False), 0.1, abs_tol=1e-9)
 
 
 def test_resolve_outcome_up_and_down():

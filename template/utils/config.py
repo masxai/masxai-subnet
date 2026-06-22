@@ -257,4 +257,17 @@ def config(cls):
     bt.logging.add_args(parser)
     bt.Axon.add_args(parser)
     cls.add_args(parser)
-    return bt.Config(parser)
+
+    # Bittensor >=10 defaults to not parsing CLI args unless this environment
+    # flag is disabled. The subnet template expects argparse defaults and CLI
+    # values to be materialized into nested config sections such as
+    # config.neuron.name, so force parsing only while building this config.
+    previous = os.environ.get("BT_NO_PARSE_CLI_ARGS")
+    os.environ["BT_NO_PARSE_CLI_ARGS"] = "0"
+    try:
+        return bt.Config(parser)
+    finally:
+        if previous is None:
+            os.environ.pop("BT_NO_PARSE_CLI_ARGS", None)
+        else:
+            os.environ["BT_NO_PARSE_CLI_ARGS"] = previous
