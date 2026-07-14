@@ -60,6 +60,10 @@ class Validator(BaseValidatorNeuron):
         self.pending: dict[str, dict] = {}
         self.resolved_count = 0
         self.last_issue_at = 0.0
+        # Gate scoring/weight emission to one cadence per forecast horizon.
+        self.last_resolution_at = 0.0
+        self.last_weights_set_at = 0.0
+        self.last_weights_resolved_count = 0
         self.load_masxai_state()
         bt.logging.info("MASXAI MVP validator initialized.")
 
@@ -73,11 +77,23 @@ class Validator(BaseValidatorNeuron):
             self.pending = s.get("pending", {})
             self.resolved_count = s.get("resolved_count", 0)
             self.last_issue_at = float(s.get("last_issue_at", 0.0))
+            self.last_resolution_at = float(s.get("last_resolution_at", 0.0))
+            self.last_weights_set_at = float(s.get("last_weights_set_at", 0.0))
+            self.last_weights_resolved_count = int(
+                s.get("last_weights_resolved_count", self.resolved_count)
+            )
             scores = s.get("scores")
             if scores is not None:
                 arr = np.array(scores, dtype=np.float32)
                 if arr.shape == self.scores.shape:
                     self.scores = arr
+                else:
+                    bt.logging.warning(
+                        f"Saved scores shape {arr.shape} does not match metagraph shape {self.scores.shape}. "
+                        "Performing overlapping copy."
+                    )
+                    copy_len = min(len(arr), len(self.scores))
+                    self.scores[:copy_len] = arr[:copy_len]
             bt.logging.info(
                 f"loaded state: {len(self.pending)} pending, "
                 f"{self.resolved_count} resolved"
@@ -93,6 +109,9 @@ class Validator(BaseValidatorNeuron):
                         "pending": self.pending,
                         "resolved_count": self.resolved_count,
                         "last_issue_at": self.last_issue_at,
+                        "last_resolution_at": self.last_resolution_at,
+                        "last_weights_set_at": self.last_weights_set_at,
+                        "last_weights_resolved_count": self.last_weights_resolved_count,
                         "scores": self.scores.tolist(),
                     },
                     f,
@@ -104,16 +123,33 @@ class Validator(BaseValidatorNeuron):
     async def resolve_due(self):
         """Resolve every pending forecast whose horizon has passed."""
         now = time.time()
+        horizon = float(C.FORECAST_HORIZON_SECONDS)
+        if self.last_resolution_at and (now - self.last_resolution_at) < horizon:
+            remaining = int(horizon - (now - self.last_resolution_at))
+            bt.logging.debug(
+                f"resolution interval not reached; next resolution in {remaining}s"
+            )
+            return
+
         due = [fid for fid, f in self.pending.items() if f["resolve_at"] <= now]
         if not due:
             return
 
+        # Fetch outcomes concurrently to avoid sequential timeout blocking
+        tasks = []
         for fid in due:
             f = self.pending[fid]
-            outcome = await oracle.resolve_forecast_outcome(
-                f,
-                subtensor=getattr(self, "subtensor", None),
+            tasks.append(
+                oracle.resolve_forecast_outcome(
+                    f,
+                    subtensor=getattr(self, "subtensor", None),
+                )
             )
+        
+        outcomes = await asyncio.gather(*tasks)
+
+        resolved_this_round = 0
+        for fid, outcome in zip(due, outcomes):
             if outcome is None:
                 bt.logging.info(f"oracle unavailable for {fid}; deferring resolution")
                 continue
@@ -132,16 +168,48 @@ class Validator(BaseValidatorNeuron):
             )
             self.scores[uid] = ema_update(float(self.scores[uid]), reward)
             self.resolved_count += 1
+            resolved_this_round += 1
             bt.logging.debug(
                 f"resolved uid={uid} event={f.get('event_type')} "
                 f"prediction={f.get('prediction')} confidence={f.get('confidence')} "
                 f"outcome={outcome} "
                 f"reward={reward:.3f} -> score={self.scores[uid]:.3f}"
             )
+        if resolved_this_round > 0:
+            self.last_resolution_at = time.time()
         bt.logging.info(
             f"resolved due forecasts | "
             f"total resolved={self.resolved_count}"
         )
+
+    def should_set_weights(self) -> bool:
+        """Set weights at most once per forecast horizon and only after new resolutions."""
+        if not super().should_set_weights():
+            return False
+
+        now = time.time()
+        horizon = float(C.FORECAST_HORIZON_SECONDS)
+        if self.last_weights_set_at and (now - self.last_weights_set_at) < horizon:
+            remaining = int(horizon - (now - self.last_weights_set_at))
+            bt.logging.debug(
+                f"weight interval not reached; next set_weights in {remaining}s"
+            )
+            return False
+
+        if self.resolved_count <= self.last_weights_resolved_count:
+            bt.logging.debug(
+                "skipping set_weights: no newly resolved forecasts since last weight set"
+            )
+            return False
+
+        return True
+
+    def set_weights(self):
+        """Set weights and persist the horizon gate state only on success."""
+        success = super().set_weights()
+        if success:
+            self.last_weights_set_at = time.time()
+            self.last_weights_resolved_count = int(self.resolved_count)
 
     # --------------------------------------------------------------- issue
     def build_question(self, event_type: str, reference: dict) -> ForecastSynapse:
