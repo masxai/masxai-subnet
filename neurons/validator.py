@@ -210,6 +210,7 @@ class Validator(BaseValidatorNeuron):
         if success:
             self.last_weights_set_at = time.time()
             self.last_weights_resolved_count = int(self.resolved_count)
+        return success
 
     # --------------------------------------------------------------- issue
     def build_question(self, event_type: str, reference: dict) -> ForecastSynapse:

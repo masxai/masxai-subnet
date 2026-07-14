@@ -282,17 +282,33 @@ class BaseValidatorNeuron(BaseNeuron):
             f"  Scaled Uint16 Weights: {uint_weights}"
         )
 
-        # Set the weights on chain via our subtensor connection.
-        result, msg = self.subtensor.set_weights(
+        # Set the weights on chain via our subtensor connection. SDK versions
+        # differ here: older releases returned (success, message), while newer
+        # releases return an ExtrinsicResponse with a .success attribute.
+        response = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
             uids=uint_uids,
             weights=uint_weights,
-            wait_for_finalization=False,
-            wait_for_inclusion=False,
+            wait_for_finalization=True,
+            wait_for_inclusion=True,
             version_key=self.spec_version,
         )
-        if result is True:
+        result = getattr(response, "success", None)
+        if result is None:
+            try:
+                result, msg = response
+            except Exception:
+                result = bool(response)
+                msg = str(response)
+        else:
+            msg = (
+                getattr(response, "message", None)
+                or getattr(response, "error_message", None)
+                or str(response)
+            )
+
+        if bool(result):
             bt.logging.info("set_weights on chain successfully!")
             return True
         else:
