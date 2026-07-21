@@ -86,28 +86,47 @@ baseline mode until outbound connectivity is fixed.
 
 ## Validator Workflow
 
-1. Snapshot objective reference data.
-2. Query miner axons with a `ForecastSynapse`.
-3. Store miner forecasts in the pending queue.
-4. Wait for `resolve_at`.
-5. Fetch actual outcome from the oracle.
-6. Score each forecast.
-7. EMA the score into `self.scores` so the template weight machinery can submit
+Default local/dev mode still snapshots objective reference data and resolves the
+one-hour TAO price question locally. Phase 1 centralized mode is enabled by
+setting `BT_FORECAST_BASE_URL`:
+
+1. Poll the BT-Forecast FastAPI service for the deterministic daily run id
+   (`BT_FORECAST_RUN_ID`, `BT_FORECAST_RUN_DATE`, or today's `bt-YYYY-MM-DD`).
+2. Fetch miner-safe questions from `/v1/forecast-runs/{run_id}/questions`.
+   Private service-only benchmark fields are not copied into the synapse.
+3. Query miner axons with `ForecastSynapse` v3.
+4. Store miner forecasts in the pending queue, keyed by run id, question key,
+   and miner uid.
+5. Wait until each question's `cutoff_date`.
+6. Fetch actual outcomes from `/v1/resolutions`.
+7. Score each miner against the real outcome, never against the engine answer.
+8. Queue accurate miner forecasts for `/v1/miner-results` feedback.
+9. EMA the score into `self.scores` so the template weight machinery can submit
    weights on chain.
 
-Pending forecasts and scores are persisted to `validator_state.json`.
+Pending forecasts and scores are persisted to `validator_state.json`. In
+centralized mode, each active pending row uses a deterministic
+`(run_id, question_key, uid)` key so a re-issued question updates that miner's
+latest active answer instead of creating duplicate unresolved rows.
 
 ## Scoring
 
-Structured forecasts use the MVP weighted score:
+Structured forecasts use the Phase 1 weighted score:
 
 ```text
 Final Score =
-50% Accuracy +
+50% Brier skill vs baseline +
 20% Confidence Calibration +
 20% Historical Consistency +
 10% Timeliness
 ```
+
+`probability` is the primary accuracy input. With the default composite baseline
+gate, a flat 0.5 forecast earns zero composite reward.
+
+For an open-source deployment, keep `BT_FORECAST_INCLUDE_LINEAGE=false` unless a
+private validator operator explicitly needs benchmark telemetry. Miner rewards do
+not depend on that telemetry.
 
 Legacy Brier helpers remain in `masxai/scoring.py` for probability-only tests and
 older local mocks.

@@ -38,6 +38,7 @@ def baseline_forecast(
         "event_type": synapse.event_type,
         "prediction": True,
         "confidence": 0.5,
+        "probability": 0.5,
         "forecast_window": synapse.forecast_window,
         "reasoning": reasoning,
         "timestamp": utc_now_iso(),
@@ -69,11 +70,20 @@ def _coerce_bool(value: Any) -> Optional[bool]:
 
 
 def sanitize_forecast(raw: Dict[str, Any], synapse: ForecastSynapse, model: str) -> Dict[str, Any]:
+    probability_raw = raw.get("probability")
+    probability = None
+    if probability_raw is not None:
+        probability = max(0.0, min(1.0, float(probability_raw)))
+
     prediction = _coerce_bool(raw.get("prediction"))
+    if prediction is None and probability is not None:
+        prediction = probability >= 0.5
     if prediction is None:
-        raise ValueError("Gemini response did not include a boolean prediction")
+        raise ValueError("Gemini response did not include a boolean prediction or probability")
 
     confidence = clamp_confidence(float(raw.get("confidence", 0.5)))
+    if probability is None:
+        probability = confidence if prediction else 1.0 - confidence
     reasoning = str(raw.get("reasoning", "")).strip()
     if len(reasoning) > 600:
         reasoning = reasoning[:597] + "..."
@@ -83,10 +93,12 @@ def sanitize_forecast(raw: Dict[str, Any], synapse: ForecastSynapse, model: str)
         "event_type": str(raw.get("event_type") or synapse.event_type),
         "prediction": prediction,
         "confidence": confidence,
+        "probability": probability,
         "forecast_window": str(raw.get("forecast_window") or synapse.forecast_window),
         "reasoning": reasoning or "No reasoning supplied.",
         "timestamp": str(raw.get("timestamp") or utc_now_iso()),
         "model": str(raw.get("model") or model),
+        "features": dict(raw.get("features") or {}),
     }
 
 
@@ -96,20 +108,28 @@ def build_prompt(synapse: ForecastSynapse) -> str:
         "event_type": synapse.event_type,
         "prediction": True,
         "confidence": 0.0,
+        "probability": 0.0,
         "forecast_window": synapse.forecast_window,
         "reasoning": "short evidence-based summary",
+        "features": {"signal_name": "optional value"},
         "timestamp": utc_now_iso(),
     }
     return (
         "You are a forecasting miner on the MASXAI Bittensor subnet.\n"
         "Return only valid JSON matching this schema, with no markdown.\n"
         f"{json.dumps(schema)}\n\n"
+        "Forecast metadata:\n"
+        f"family={synapse.family or synapse.event_type}\n"
+        f"scope={synapse.scope or 'unknown'}\n"
+        f"netuid={synapse.netuid if synapse.netuid is not None else 'n/a'}\n"
+        f"horizon_days={synapse.horizon_days if synapse.horizon_days is not None else 'n/a'}\n\n"
         "Forecast question:\n"
         f"{synapse.question}\n\n"
         "Context:\n"
         f"{synapse.context or 'No additional context supplied.'}\n\n"
         "Rules:\n"
         "- prediction must be boolean.\n"
+        "- probability must be your calibrated P(YES) between 0 and 1.\n"
         "- confidence must be a calibrated number between 0 and 1.\n"
         "- reasoning must be concise and must not claim certainty.\n"
     )

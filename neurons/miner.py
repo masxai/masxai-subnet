@@ -70,11 +70,17 @@ class Miner(BaseMinerNeuron):
         synapse.forecast_id = str(forecast.get("forecast_id") or synapse.forecast_id)
         synapse.prediction = forecast.get("prediction")
         synapse.confidence = forecast.get("confidence")
+        synapse.probability = forecast.get("probability")
         synapse.reasoning = str(forecast.get("reasoning") or "")
         synapse.timestamp = str(forecast.get("timestamp") or "")
         synapse.model = str(forecast.get("model") or C.GEMINI_MODEL)
+        synapse.features = dict(forecast.get("features") or {})
 
-        if synapse.prediction is not None and synapse.confidence is not None:
+        if (
+            synapse.probability is None
+            and synapse.prediction is not None
+            and synapse.confidence is not None
+        ):
             synapse.probability = (
                 float(synapse.confidence)
                 if synapse.prediction
@@ -101,15 +107,22 @@ class Miner(BaseMinerNeuron):
             return True, f"unregistered hotkey {hotkey}"
 
         uid = self.metagraph.hotkeys.index(hotkey)
-        # In v1 we only require registration. To restrict to validators, also check:
-        #   if not self.metagraph.validator_permit[uid]: return True, "no validator permit"
+        if _env_flag(C.MINER_REQUIRE_VALIDATOR_PERMIT_ENV, False):
+            permits = getattr(self.metagraph, "validator_permit", None)
+            if permits is None:
+                return True, "validator permit unavailable"
+            if not bool(permits[uid]):
+                return True, "no validator permit"
         return False, f"accepted from uid {uid}"
 
     async def priority(self, synapse: ForecastSynapse) -> float:
         """Prioritize higher-stake callers. Standard template pattern."""
         if synapse.dendrite is None or synapse.dendrite.hotkey is None:
             return 0.0
-        uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
+        try:
+            uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
+        except ValueError:
+            return 0.0
         return float(self.metagraph.S[uid])
 
 
